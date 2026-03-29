@@ -1,66 +1,85 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.19;
+pragma solidity ^0.8.20;
 
-/**
- * @title CarbonCredit
- * @dev Solidity contract for managing carbon credits based on verified SOC (Soil Organic Carbon) data.
- */
-contract CarbonCredit {
-    address public oracle;
-    
-    struct FarmData {
+import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+
+contract CarbonCredit is ERC721, Ownable {
+
+    uint256 private _tokenIdCounter;
+
+    struct CreditData {
+        string  nodeId;
         uint256 timestamp;
-        uint256 socPercentage; // SOC percentage (scaled, e.g., 250 = 2.50%)
-        bytes32 dataHash;      // SHA-256 hash of the daily raw data
-        uint256 carbonCredits; // Issued credits
+        int256  socPercent;    // scaled x1000 (e.g. 1250 = 1.250%)
+        int256  previousSoc;
+        bytes32 dataHash;
+        uint256 co2Tonnes;     // scaled x1000
     }
 
-    mapping(string => FarmData[]) public farmRecords; // Maps "node_id" to their records
-    mapping(string => uint256) public totalCredits;   // Maps "node_id" to total accrued credits
+    mapping(uint256 => CreditData) public credits;
+    mapping(address => bool)       public registeredDevices;
+    mapping(address => int256)     public lastSOC;
 
-    event DataAttested(string nodeId, uint256 socPercentage, uint256 creditsIssued, bytes32 dataHash);
+    event CreditMinted(uint256 indexed tokenId, address indexed farmer, uint256 co2Tonnes);
+    event DeviceRegistered(address indexed device);
 
-    modifier onlyOracle() {
-        require(msg.sender == oracle, "Only the authorized oracle can submit data");
-        _;
+    constructor() ERC721("AgriChain Carbon Credit", "AGCC") Ownable(msg.sender) {}
+
+    function registerDevice(address device) external onlyOwner {
+        registeredDevices[device] = true;
+        emit DeviceRegistered(device);
     }
 
-    constructor() {
-        // The deployer of the contract becomes the authorized oracle
-        oracle = msg.sender;
+    function verify(
+        bytes32 dataHash,
+        bytes memory signature,
+        address device
+    ) public pure returns (bool) {
+        bytes32 ethHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", dataHash));
+        (bytes32 r, bytes32 s, uint8 v) = splitSignature(signature);
+        return ecrecover(ethHash, v, r, s) == device;
     }
 
-    /**
-     * @dev Oracle submits daily SOC data. The contract simple calculation mints credits 
-     *      based on SOC percentage thresholds.
-     */
-    function attestData(string memory nodeId, uint256 socPercentage, bytes32 dataHash) external onlyOracle {
-        uint256 creditsToIssue = 0;
+    function mint(
+        address farmer,
+        address device,
+        string  memory nodeId,
+        int256  socPercent,
+        bytes32 dataHash,
+        bytes   memory signature
+    ) external {
+        require(registeredDevices[device], "Device not registered");
+        require(verify(dataHash, signature, device), "Invalid signature");
 
-        // Example logic: if SOC > 3.00% (represented as 300), issue 1 credit. 
-        // If SOC > 5.00% (represented as 500), issue 2 credits.
-        if (socPercentage > 500) {
-            creditsToIssue = 2;
-        } else if (socPercentage > 300) {
-            creditsToIssue = 1;
+        int256 prevSoc = lastSOC[device];
+        require(socPercent > prevSoc, "SOC has not increased");
+
+        // CO2 = SOC increase * 10000 kg/ha simplified factor, scaled x1000
+        uint256 co2 = uint256((socPercent - prevSoc) * 10);
+
+        uint256 tokenId = _tokenIdCounter++;
+        _safeMint(farmer, tokenId);
+
+        credits[tokenId] = CreditData({
+            nodeId:      nodeId,
+            timestamp:   block.timestamp,
+            socPercent:  socPercent,
+            previousSoc: prevSoc,
+            dataHash:    dataHash,
+            co2Tonnes:   co2
+        });
+
+        lastSOC[device] = socPercent;
+        emit CreditMinted(tokenId, farmer, co2);
+    }
+
+    function splitSignature(bytes memory sig) internal pure returns (bytes32 r, bytes32 s, uint8 v) {
+        require(sig.length == 65, "Invalid signature length");
+        assembly {
+            r := mload(add(sig, 32))
+            s := mload(add(sig, 64))
+            v := byte(0, mload(add(sig, 96)))
         }
-
-        farmRecords[nodeId].push(FarmData({
-            timestamp: block.timestamp,
-            socPercentage: socPercentage,
-            dataHash: dataHash,
-            carbonCredits: creditsToIssue
-        }));
-
-        totalCredits[nodeId] += creditsToIssue;
-
-        emit DataAttested(nodeId, socPercentage, creditsToIssue, dataHash);
-    }
-
-    /**
-     * @dev Gets the total number of records for a specific node
-     */
-    function getRecordCount(string memory nodeId) external view returns (uint256) {
-        return farmRecords[nodeId].length;
     }
 }

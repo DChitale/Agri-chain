@@ -33,7 +33,7 @@ def on_message(client, userdata, msg):
             .field("temperature",    data["temp"])
             .field("humidity",       data["humidity"])
             .field("soil_moisture",  data["soil_moisture"])
-            .time(datetime.now(timezone.utc), WritePrecision.NANOSECONDS)
+            .time(datetime.now(timezone.utc), WritePrecision.NS)
         )
         write_api.write(bucket=INFLUX_BUCKET, record=point)
         print(f"[+] Written: {data}")

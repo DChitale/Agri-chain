@@ -87,5 +87,5 @@ void loop() {
   Serial.println(payload);
   client.publish("farm/sensors", payload.c_str());
 
-  delay(10000);
+  delay(600000);
 }
