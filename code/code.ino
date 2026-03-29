@@ -1,13 +1,14 @@
 #include <WiFi.h>
+#include "secrets.h"
 #include <PubSubClient.h>
 #include <DHT.h>
 
 // --- Configuration ---
-const char* ssid = "WiFI";
-const char* password = "PAss";
-const char* mqtt_server = "192.168.1.41"; // Your Raspberry Pi IP
+const char* ssid = WIFI_SSID;
+const char* password = WIFI_PASS;
+const char* mqtt_server = IP_ADDRESS; // Your Raspberry Pi IP
 
-#define DHTPIN 4
+#define DHTPIN 14
 #define DHTTYPE DHT22
 #define SOIL_PIN 34
 
