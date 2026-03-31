@@ -5,3 +5,4 @@ pandas
 scikit-learn
 web3
 numpy
+tensorflow

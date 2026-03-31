@@ -2,7 +2,9 @@ import os
 import json
 import hashlib
 import pickle
+import numpy as np
 import pandas as pd
+import keras
 from web3 import Web3
 from eth_account.messages import encode_defunct
 from influxdb_client import InfluxDBClient
@@ -22,15 +24,26 @@ DEVICE_PRIVATE_KEY = os.getenv("DEVICE_PRIVATE_KEY")
 FARMER_ADDRESS   = os.getenv("FARMER_ADDRESS")
 CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS")
 
-OUTPUT_CSV = "data/daily_aggregates.csv"
-MODEL_PATH = "model/soc_model.pkl"
+OUTPUT_CSV      = "data/daily_aggregates.csv"
+MODEL_PATH      = "model/soc_model.pkl"
+ANOMALY_MODEL   = "model/anomaly_model.keras"
+ANOMALY_SCALER  = "model/anomaly_scaler.pkl"
+ANOMALY_THRESH  = "model/anomaly_threshold.txt"
+SEQ_LEN         = 12
+FEATURES        = ["temperature", "humidity", "soil_moisture"]
 SOC_MIN    = 0.3
 SOC_MAX    = 2.5
 MAX_DAILY_CHANGE = 0.5
 
-# --- Load model and contract ---
+# --- Load models and contract ---
 with open(MODEL_PATH, "rb") as f:
     model = pickle.load(f)
+
+anomaly_model = keras.models.load_model(ANOMALY_MODEL)
+with open(ANOMALY_SCALER, "rb") as f:
+    anomaly_scaler = pickle.load(f)
+with open(ANOMALY_THRESH) as f:
+    ANOMALY_THRESHOLD = float(f.read().strip())
 
 with open("contract/abi.json") as f:
     ABI = json.load(f)
@@ -51,6 +64,18 @@ def fetch_last_24h():
     df = query_api.query_data_frame(query)
     client.close()
     return df
+
+# --- Step 1b: Anomaly Detection ---
+def check_anomalies(df):
+    data = anomaly_scaler.transform(df[FEATURES])
+    if len(data) < SEQ_LEN:
+        print(f"[!] Not enough data for anomaly detection (need {SEQ_LEN})")
+        return 0
+    sequences = np.array([data[i:i+SEQ_LEN] for i in range(len(data) - SEQ_LEN)])
+    preds  = anomaly_model.predict(sequences, verbose=0)
+    errors = np.mean(np.abs(sequences - preds), axis=(1, 2))
+    n_anomalies = int(np.sum(errors > ANOMALY_THRESHOLD))
+    return n_anomalies
 
 # --- Step 2: Aggregate ---
 def aggregate(df):
@@ -134,6 +159,12 @@ def main():
     if df.empty:
         print("[!] No sensor data in last 24h. Exiting.")
         return
+
+    n_anomalies = check_anomalies(df)
+    if n_anomalies > 0:
+        print(f"[!] {n_anomalies} anomalies detected in sensor data. Aborting mint.")
+        return
+    print(f"[+] No anomalies detected")
 
     daily = aggregate(df)
     soc   = predict_soc(daily)
