@@ -26,7 +26,7 @@ ESP32 Sensors → MQTT → Raspberry Pi → InfluxDB
 
 ## Hardware
 
-- ESP32 + DHT22 (temperature/humidity) + capacitive soil moisture sensor
+- ESP32 + DHT22 (temperature/humidity) +  soil moisture sensor
 - Raspberry Pi 4B (8GB) — edge AI + Web3 oracle
 
 ---
