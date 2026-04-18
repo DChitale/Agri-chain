@@ -4,6 +4,7 @@ import hashlib
 import pickle
 import numpy as np
 import pandas as pd
+os.environ["KERAS_BACKEND"] = "torch"
 import keras
 from web3 import Web3
 from eth_account.messages import encode_defunct
